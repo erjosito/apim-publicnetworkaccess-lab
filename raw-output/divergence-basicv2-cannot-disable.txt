@@ -1,0 +1,17 @@
+S-divergence - Basic v2 cannot disable public network access
+Date: 2026-07-01  Region: swedencentral  API version: 2024-05-01
+
+Step 1: Attempt to create private endpoint to Basic v2 APIM (group-id Gateway)
+ERROR (PrivateEndpointNotSupportedInServiceSku):
+  Setting up Private Endpoint Connection for API Management service apim-basicv2-ven9pg
+  which is of BasicV2 is not supported.
+
+Step 2: Attempt PATCH publicNetworkAccess=Disabled directly on Basic v2 (no PE)
+ERROR (DisablingPublicNetworkAccessRequiredPrivateEndpoint):
+  Disabling all publicNetworkAccess for service apim-basicv2-ven9pg is not supported
+  if the service does not [have] atleast one approved Private Endpoint Connections.
+
+CONCLUSION: Basic v2 supports NEITHER inbound private endpoints NOR disabling public
+network access. To disable public access on a v2 SKU you must use Standard v2 or Premium v2.
+This matches the private-endpoint doc 'APPLIES TO' list: Developer | Basic | Standard |
+Standard v2 | Premium | Premium v2  (Basic v2 is intentionally absent).

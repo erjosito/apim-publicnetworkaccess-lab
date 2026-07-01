@@ -1,0 +1,23 @@
+S2c - Disabling public network access on STANDARD V2 (divergence in tooling)
+Date: 2026-07-01  Region: swedencentral
+
+--- Private endpoint to Standard v2 ---
+CMD: az network private-endpoint create -g rg-apim-pna-lab -n pe-apim-stdv2 \
+       --vnet-name vnet-apim-lab --subnet snet-pe \
+       --private-connection-resource-id <stdv2-id> --group-id Gateway \
+       --connection-name pe-stdv2-conn
+OUT: { "name": "pe-apim-stdv2", "state": "Succeeded" }
+PE connection status: pe-stdv2-conn  Approved  Succeeded   (auto-approved, same subscription)
+
+--- Attempt the CLASSIC CLI path on a v2 SKU (divergence) ---
+CMD: az apim update -g rg-apim-pna-lab -n apim-stdv2-ven9pg --public-network-access false
+OUT ERROR (OperationSupportedInSkuForApiVersions):
+  Operation on StandardV2 SKU is only supported in the api-versions 2023-03-01-preview,
+  2023-05-01-preview,...,2024-05-01,...  ==> z apim update uses an older api-version and
+  is NOT usable for v2 SKUs. Classic-only path.
+
+--- Supported v2 path: REST PATCH ---
+CMD: az rest --method PATCH --uri ".../apim-stdv2-ven9pg?api-version=2024-05-01" \
+       --body '{ "properties": { "publicNetworkAccess": "Disabled" } }'
+OUT: { "name": "apim-stdv2-ven9pg", "pna": "Enabled->Disabled", "state": "Updating" }
+RESULT: Accepted. publicNetworkAccess transitions to Disabled after the async update completes.

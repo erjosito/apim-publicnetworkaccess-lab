@@ -1,0 +1,26 @@
+{
+  "properties": {
+    "displayName": "Audit or deny API Management with public network access enabled",
+    "policyType": "Custom",
+    "mode": "Indexed",
+    "description": "Guardrail that flags (Audit) or blocks (Deny) API Management instances whose publicNetworkAccess is not 'Disabled'. Evaluation of the alias works even though it is not Modifiable, so Deny/Audit are valid; only the Modify EFFECT is impossible. Deny cannot itself remediate - pair it with the DeployIfNotExists policy or IaC. NOTE: Deny on create is of limited use here because publicNetworkAccess cannot be set at create time anyway (it is always Enabled on a fresh instance); use this mainly to Audit drift or Deny updates that re-enable public access.",
+    "metadata": { "category": "API Management", "version": "1.0.0" },
+    "parameters": {
+      "effect": {
+        "type": "String",
+        "defaultValue": "Audit",
+        "allowedValues": [ "Audit", "Deny", "Disabled" ],
+        "metadata": { "displayName": "Effect", "description": "Audit (flag) or Deny (block)" }
+      }
+    },
+    "policyRule": {
+      "if": {
+        "allOf": [
+          { "field": "type", "equals": "Microsoft.ApiManagement/service" },
+          { "field": "Microsoft.ApiManagement/service/publicNetworkAccess", "notEquals": "Disabled" }
+        ]
+      },
+      "then": { "effect": "[parameters('effect')]" }
+    }
+  }
+}

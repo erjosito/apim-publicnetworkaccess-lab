@@ -1,0 +1,42 @@
+S4 - DeployIfNotExists (DINE) policy remediation at scale
+Date: 2026-07-01  Region: swedencentral
+
+--- Setup ---
+1. Policy definition (subscription scope):
+   az policy definition create --name apim-disable-pna-dine --mode Indexed \
+     --rules @rules.json --params @params.json
+2. Assignment (RG scope) with system-assigned managed identity:
+   az policy assignment create --name apim-disable-pna-assign \
+     --policy apim-disable-pna-dine --scope <rg> --mi-system-assigned --location swedencentral
+   -> principalId cd259ac6-...
+3. Grant MI 'API Management Service Contributor' (312a565d-...) at RG scope:
+   az role assignment create --assignee-object-id <principalId> \
+     --assignee-principal-type ServicePrincipal --role 312a565d-... --scope <rg>
+
+--- Non-compliant target ---
+Re-enabled public access on apim-stdv2 (keeps its approved private endpoint) so it is a
+valid, remediable non-compliant instance.
+
+--- IMPORTANT template gotcha (fixed) ---
+First DINE template used reference() inside the resource 'sku' block to preserve the
+existing SKU/publisher. ARM rejected it:
+   InvalidTemplate: "The template function 'reference' is not expected at this location."
+reference() is NOT allowed in a resource's sku/name/location. FIX: pass sku.name,
+sku.capacity, publisherEmail, publisherName as deployment PARAMETERS resolved by the
+policy engine via field() aliases (which exist for all four), then use parameters() in
+the template. This is the robust DINE pattern for APIM.
+
+--- Remediation result (az policy remediation create ... ExistingNonCompliant) ---
+Task state: Succeeded  |  totalDeployments=3  successful=1  failed=2
+
+  SUCCEEDED - apim-stdv2-ven9pg   -> publicNetworkAccess flipped Enabled -> DISABLED
+                                     by the policy managed identity, NO manual CLI/API call.
+  FAILED    - apim-basicv2-ven9pg -> DisablingPublicNetworkAccessRequiredPrivateEndpoint
+                                     (Basic v2 has no PE -> expected, documented caveat)
+  FAILED    - apim-classic-ven9pg -> NoPolicyEvaluationResult (stale record; classic was
+                                     already Disabled via S2a -> not a real failure)
+
+CONCLUSION: DINE is the working, policy-native, no-manual-CLI way to enforce
+publicNetworkAccess=Disabled at scale. It only succeeds on instances that already have an
+approved private endpoint (so a production DINE should also deploy the PE, and cannot
+target Basic v2).

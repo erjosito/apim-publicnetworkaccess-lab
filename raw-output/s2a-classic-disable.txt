@@ -1,0 +1,16 @@
+S2a - Disabling public network access on CLASSIC (Developer) - CLI path
+Date: 2026-07-01  Region: swedencentral
+
+--- Private endpoint to classic APIM ---
+CMD: az network private-endpoint create -g rg-apim-pna-lab -n pe-apim-classic \
+       --vnet-name vnet-apim-lab --subnet snet-pe \
+       --private-connection-resource-id <classic-id> --group-id Gateway \
+       --connection-name pe-classic-conn
+OUT: PE provisioningState=Succeeded ; connection status=Approved (auto-approved, same subscription)
+NOTE: attaching a PE to a CLASSIC instance triggers a full service update (~10-20 min).
+
+--- Disable public network access (classic-only CLI) ---
+CMD: az apim update -g rg-apim-pna-lab -n apim-classic-ven9pg --public-network-access false
+OUT: { "name": "apim-classic-ven9pg", "pna": "Disabled", "state": "Succeeded" }
+RESULT: SUCCESS. Classic supports the z apim update --public-network-access false CLI path.
+        (Long-running: the classic service update took several minutes.)

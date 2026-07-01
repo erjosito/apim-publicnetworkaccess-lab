@@ -1,0 +1,10 @@
+[
+  {
+    "defaultMetadata": null,
+    "defaultPath": "properties.publicNetworkAccess",
+    "defaultPattern": null,
+    "name": "Microsoft.ApiManagement/service/publicNetworkAccess",
+    "paths": null,
+    "type": null
+  }
+]

@@ -1,0 +1,87 @@
+{
+  "properties": {
+    "displayName": "Disable public network access on API Management (DeployIfNotExists)",
+    "policyType": "Custom",
+    "mode": "Indexed",
+    "description": "Remediates API Management instances whose publicNetworkAccess is not 'Disabled'. Because the publicNetworkAccess alias is NOT flagged 'Modifiable', a Modify effect cannot be used - DeployIfNotExists is the policy-native way to enforce this at scale. NOTE: the target instance must already have an approved inbound private endpoint, otherwise the underlying control-plane rejects the change with 'ActivateServiceWithPrivateEndpointAccessNotAllowed'.",
+    "metadata": {
+      "category": "API Management",
+      "version": "1.0.0"
+    },
+    "parameters": {
+      "effect": {
+        "type": "String",
+        "defaultValue": "DeployIfNotExists",
+        "allowedValues": [ "DeployIfNotExists", "AuditIfNotExists", "Disabled" ],
+        "metadata": { "displayName": "Effect", "description": "Enable or disable the execution of the policy" }
+      }
+    },
+    "policyRule": {
+      "if": {
+        "allOf": [
+          { "field": "type", "equals": "Microsoft.ApiManagement/service" },
+          {
+            "field": "Microsoft.ApiManagement/service/publicNetworkAccess",
+            "notEquals": "Disabled"
+          }
+        ]
+      },
+      "then": {
+        "effect": "[parameters('effect')]",
+        "details": {
+          "type": "Microsoft.ApiManagement/service",
+          "name": "[field('name')]",
+          "existenceCondition": {
+            "field": "Microsoft.ApiManagement/service/publicNetworkAccess",
+            "equals": "Disabled"
+          },
+          "roleDefinitionIds": [
+            "/providers/Microsoft.Authorization/roleDefinitions/312a565d-c81f-4fd8-895a-4e21e48d571c"
+          ],
+          "deployment": {
+            "properties": {
+              "mode": "incremental",
+              "parameters": {
+                "serviceName": { "value": "[field('name')]" },
+              "location": { "value": "[field('location')]" },
+              "skuName": { "value": "[field('Microsoft.ApiManagement/service/sku.name')]" },
+              "skuCapacity": { "value": "[field('Microsoft.ApiManagement/service/sku.capacity')]" },
+              "publisherEmail": { "value": "[field('Microsoft.ApiManagement/service/publisherEmail')]" },
+              "publisherName": { "value": "[field('Microsoft.ApiManagement/service/publisherName')]" }
+            },
+            "template": {
+              "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+              "contentVersion": "1.0.0.0",
+              "parameters": {
+                "serviceName": { "type": "string" },
+                "location": { "type": "string" },
+                "skuName": { "type": "string" },
+                "skuCapacity": { "type": "int" },
+                "publisherEmail": { "type": "string" },
+                "publisherName": { "type": "string" }
+              },
+              "resources": [
+                {
+                  "type": "Microsoft.ApiManagement/service",
+                  "apiVersion": "2024-05-01",
+                  "name": "[parameters('serviceName')]",
+                  "location": "[parameters('location')]",
+                  "sku": {
+                    "name": "[parameters('skuName')]",
+                    "capacity": "[parameters('skuCapacity')]"
+                  },
+                  "properties": {
+                    "publisherEmail": "[parameters('publisherEmail')]",
+                    "publisherName": "[parameters('publisherName')]",
+                    "publicNetworkAccess": "Disabled"
+                  }
+                }
+              ]
+            }
+          }
+          }
+        }
+      }
+    }
+  }
+}

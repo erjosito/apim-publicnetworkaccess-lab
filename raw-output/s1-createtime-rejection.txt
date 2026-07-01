@@ -1,0 +1,13 @@
+S1 - Attempt to create APIM with publicNetworkAccess=Disabled and NO private endpoint
+Date: 2026-07-01  Subscription: a8fbd8e1-... (Litware MCAPS)  Region: swedencentral
+API version: 2024-05-01
+
+===== apim-s1-classic-ven9pg (Developer / classic) =====
+ERROR: Bad Request
+{"error":{"code":"ActivateServiceWithPrivateEndpointAccessNotAllowed","message":"Blocking all public network access by setting property `publicNetworkAccess` of API Management service .../apim-s1-classic-ven9pg is not enabled during service creation."}}
+
+===== apim-s1-v2-ven9pg (Basicv2) =====
+ERROR: Bad Request
+{"error":{"code":"ActivateServiceWithPrivateEndpointAccessNotAllowed","message":"Blocking all public network access by setting property `publicNetworkAccess` of API Management service .../apim-s1-v2-ven9pg is not enabled during service creation."}}
+
+RESULT: Both tiers reject synchronously with the SAME error code. Resource is NOT created.

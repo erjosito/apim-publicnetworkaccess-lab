@@ -1,0 +1,41 @@
+[
+  {
+    "defaultMetadata": {
+      "attributes": "Modifiable",
+      "type": "String"
+    },
+    "defaultPath": "properties.publicNetworkAccess",
+    "defaultPattern": null,
+    "name": "Microsoft.Storage/storageAccounts/publicNetworkAccess",
+    "paths": [
+      {
+        "apiVersions": [
+          "2021-04-01",
+          "2021-02-01",
+          "2021-01-01",
+          "2020-08-01-preview",
+          "2019-06-01",
+          "2019-04-01",
+          "2018-11-01",
+          "2018-07-01",
+          "2018-03-01-preview",
+          "2018-02-01",
+          "2017-10-01",
+          "2017-06-01",
+          "2016-12-01",
+          "2016-05-01",
+          "2016-01-01",
+          "2015-06-15",
+          "2015-05-01-preview"
+        ],
+        "metadata": {
+          "attributes": "None",
+          "type": "NotSpecified"
+        },
+        "path": "properties.publicNetworkAccess",
+        "pattern": null
+      }
+    ],
+    "type": null
+  }
+]
