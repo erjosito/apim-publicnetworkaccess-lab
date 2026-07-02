@@ -84,6 +84,24 @@ This is the crux of the whole question, so it's worth being precise:
 - **Existence condition** — the test for "already compliant" so DINE only acts on resources that need fixing.
 - **Remediation task** — DINE fixes *new/updated* resources automatically; to fix **existing** resources you trigger a one-off *remediation task* that scans and deploys to the non-compliant ones.
 
+### What is "IaC" and a "two-phase" deployment?
+
+**Infrastructure as Code (IaC)** means describing your Azure resources in a text file (Bicep, ARM JSON, or Terraform) and letting a tool create them, instead of clicking in the portal or typing CLI commands by hand. The file is version-controlled and run by a **pipeline** (an automated CI/CD job), so the same result is reproducible across dozens of subscriptions — that's what "at scale" means here.
+
+Because Azure won't accept `publicNetworkAccess = Disabled` until a private endpoint exists, a single IaC file is applied **twice**:
+- **Phase 1** — create the APIM instance *and* its private endpoint, still `Enabled`.
+- **Phase 2** — re-run the *same* file with one parameter flipped, which sets `Disabled`.
+
+Re-running the same declarative file is safe: IaC is **idempotent** (applying it again only changes what's different), so phase 2 just performs the one remaining change.
+
+### What is a "script in IaC" (`deploymentScripts`), and shared-key storage?
+
+Sometimes people want to avoid the two-phase split and do everything in **one** deployment. ARM/Bicep offers a special resource, **`Microsoft.Resources/deploymentScripts`**, that runs a small **Azure CLI or PowerShell script as part of the deployment itself**. You can tell it to wait for the private endpoint (`dependsOn`) and then run the command that disables public access — all in a single apply.
+
+The hidden cost: to run that script, Azure automatically creates a temporary **Azure Container Instance (ACI)** — a throwaway container — plus a **Storage account** to hold the script and its output. That storage account is accessed using its **access key** ("shared-key" authentication — a long secret string, as opposed to identity-based sign-in).
+
+Many security-conscious organizations enforce a policy that **forbids shared-key access on storage accounts** (identity-only). In such tenants, `deploymentScripts` simply cannot run — it fails with `KeyBasedAuthenticationNotPermitted`. Ironically those are the same organizations most likely to want public access disabled, so this option is usually unavailable exactly where you'd reach for it. (Terraform doesn't have this problem because its script step runs on the pipeline machine, not in an Azure-side storage-backed container.)
+
 ---
 
 ## Findings per tier
