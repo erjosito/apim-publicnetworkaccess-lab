@@ -15,7 +15,74 @@
 4. **At scale, wrap the post-create disable in either:**
    - **IaC (Bicep/Terraform/ARM)** — a two-phase declarative deployment (create + PE, then flip to Disabled), driven by a pipeline. *Primary recommendation.*
    - **Azure Policy `DeployIfNotExists` (DINE)** — the policy-native way to enforce/remediate fleet-wide, since `modify` can't be used. Pair with an `audit`/`deny` guardrail.
+   - *(niche)* **A script embedded in the IaC deployment** (`Microsoft.Resources/deploymentScripts`) can PATCH the flag in a single deployment — but it needs a key-enabled storage account and is **blocked** in tenants that disable shared-key storage (see [validation](#val--validating-the-other-at-scale-approaches)).
 5. **Basic v2 can *never* disable public network access** — it supports neither inbound private endpoints nor the disable operation.
+
+> All five approaches were **empirically validated** in a live lab — see [Validating the other at-scale approaches](#val--validating-the-other-at-scale-approaches).
+
+---
+
+## New to APIM or Azure Policy? Start here
+
+This section explains the moving parts from scratch. If you already know APIM and DINE policies, skip to [Findings per tier](#findings-per-tier).
+
+### What is API Management (APIM)?
+
+Azure **API Management** is a managed **API gateway** — a front door that sits between API consumers and your backend services. Clients call APIM; APIM applies auth, rate-limiting, caching, and routing, then forwards the call to the real backend. By default an APIM instance has a **public endpoint** on the internet.
+
+APIM comes in **tiers (SKUs)** with different capabilities and prices. There are two generations:
+- **Classic** tiers: `Developer` (cheap, no SLA — for labs), `Basic`, `Standard`, `Premium`.
+- **v2** tiers (newer architecture, faster to deploy): `Basic v2`, `Standard v2`, `Premium v2`.
+
+The tier matters a lot here because networking features differ between them — which is the source of the divergences this lab documents.
+
+### What is "public network access" and a private endpoint?
+
+- **`publicNetworkAccess`** is a property on the APIM instance. When `Enabled` (default), the gateway is reachable from the public internet. When `Disabled`, only **private** traffic is allowed.
+- A **private endpoint (PE)** is a network interface with a *private* IP address, placed inside your virtual network (VNet). It gives resources on that VNet a private, non-internet path to the APIM instance over Azure's backbone (Azure Private Link).
+- The rule Azure enforces: you may only set `publicNetworkAccess = Disabled` **after** an approved private endpoint exists — otherwise you'd instantly lock yourself out (no public path *and* no private path). That ordering constraint is the root cause of nearly everything in this lab.
+
+### What is Azure Policy?
+
+**Azure Policy** is a governance service that evaluates your resources against rules ("policy definitions") and can **audit**, **block**, or **auto-fix** them at scale (across a whole subscription or management group). A rule has two halves:
+- an **`if`** condition that decides which resources the rule applies to, and
+- a **`then`** **effect** that says what to do.
+
+Common effects and *when* they act:
+
+| Effect | When it runs | What it does |
+|---|---|---|
+| `audit` | at create/update **and** on periodic scans | Only *flags* non-compliant resources (reporting). Changes nothing. |
+| `deny` | **during** a create/update request | *Blocks* the request before it is saved. |
+| `modify` | **during** a create/update request | **Rewrites** the incoming request payload (e.g. force a property to a value) before it is saved. |
+| `deployIfNotExists` (**DINE**) | **after** a resource is created/updated, and on scans | Runs a **separate follow-up deployment** to bring the resource into compliance. |
+
+### What is a policy "alias", and why does "Modifiable" matter?
+
+Azure Policy can't see arbitrary JSON paths inside a resource — it can only reference properties that the resource provider has published as **aliases** (e.g. `Microsoft.ApiManagement/service/publicNetworkAccess`). Each alias carries metadata, including an **`attributes`** flag that is either `Modifiable` or absent.
+
+- If an alias is **`Modifiable`**, the `modify` and `append` effects are allowed to change it *in the incoming request*.
+- If it is **not** `Modifiable` (APIM's `publicNetworkAccess` is not), Azure Policy **refuses to even save** a `modify` definition that targets it. We proved this live — see [S0](#s0--the-policy-alias-is-not-modifiable-the-crux-no-deployment-needed) and [val-modify](#val--validating-the-other-at-scale-approaches).
+
+### The key idea: *why does DINE work when `modify` cannot?*
+
+This is the crux of the whole question, so it's worth being precise:
+
+- **`modify` edits the request in flight.** When you create or update the resource, the policy engine mutates the JSON payload *before* Resource Manager persists it. Azure only permits this for properties on the **`Modifiable` allow-list** (a safety catalog the resource provider controls). `publicNetworkAccess` isn't on that list, so `modify` is rejected outright — you can't even create the definition.
+
+- **DINE makes a normal follow-up API call.** DINE does **not** touch the original request. It watches for resources that fail an **existence condition** (here: "`publicNetworkAccess` is not `Disabled`"), and when it finds one it uses a **managed identity** to launch an *ordinary ARM deployment* — exactly the same public REST call a human or a CI/CD pipeline would make. Because it's a regular deployment and **not** an in-request mutation, it is **not** constrained by the `Modifiable` allow-list. It can set anything the REST API itself accepts.
+
+> **Analogy.** `modify` is like a mail-room clerk who is only allowed to edit certain fields on a letter as it passes through — `publicNetworkAccess` isn't a field they're cleared to touch, so they refuse the job entirely. DINE is like a colleague who lets the letter go through unchanged, then later walks over and files a brand-new, fully-authorized form to correct it. The second person isn't bound by the clerk's narrow edit list.
+
+**The catch:** because DINE just calls the normal API, it is *also* subject to the platform's own rules. Setting `publicNetworkAccess = Disabled` still requires an approved private endpoint — so DINE succeeds on instances that have a PE and **fails** on ones that can't (e.g. Basic v2). A production-grade DINE policy therefore also deploys the private endpoint as part of its remediation template.
+
+### Pieces a DINE policy needs (glossary)
+
+- **Policy definition** — the rule itself (the `if`/`then` with the remediation ARM template).
+- **Policy assignment** — attaches the definition to a scope (subscription / resource group). For DINE it must be given a **managed identity**.
+- **Managed identity + role** — the identity DINE uses to make changes; it needs an RBAC role with permission to edit the resource (here, *API Management Service Contributor*).
+- **Existence condition** — the test for "already compliant" so DINE only acts on resources that need fixing.
+- **Remediation task** — DINE fixes *new/updated* resources automatically; to fix **existing** resources you trigger a one-off *remediation task* that scans and deploys to the non-compliant ones.
 
 ---
 
@@ -75,7 +142,27 @@ flowchart LR
 | **Policy `modify`** | — | — | — | **Impossible** — alias not `Modifiable` |
 | **Policy `DeployIfNotExists`** | No (async after create) | ✅ Yes | No | Needs managed identity + a PE-first template; remediation is asynchronous |
 | **Policy `audit`/`deny`** | Blocks/flags only | Detects, can't fix | No | Great guardrail, cannot remediate; pair with DINE/IaC |
+| **Script in IaC (`deploymentScripts`)** | ✅ single deployment (dependsOn PE) | Only what you redeploy | No (runs in-template) | **Blocked** where shared-key storage is denied; extra ACI+storage cost; imperative-in-declarative |
 | **`az apim update` / REST** | No | Per-instance | Yes | The underlying op the others wrap; classic=CLI, v2=REST |
+
+---
+
+## <a id="val--validating-the-other-at-scale-approaches"></a>Val — Validating the other at-scale approaches
+
+DINE (S4) was validated end-to-end above. Because it *failed by design* on Basic v2 (no PE) and looked inconclusive on classic (stale compliance record), every **other** at-scale option was also exercised live on a Standard v2 instance (`rg-apim-pna-lab2`). Results:
+
+| # | Approach | Result | Evidence |
+|---|---|---|---|
+| 1 | **IaC 2-phase (Bicep)** — *primary rec* | ✅ **Works.** Phase 1 creates APIM + PE (`Enabled`); phase 2 = same template flips to `Disabled`. Declarative, idempotent, pipeline-friendly. | [`val-iac-and-deny.txt`](raw-output/val-iac-and-deny.txt), [`bicep/apim-private.bicep`](bicep/apim-private.bicep) |
+| 2 | **Policy `modify`** | ❌ **Impossible.** Azure *rejects the definition at creation*: `InvalidPolicyRuleModifyDetails … aliases that are not modifiable`. You cannot even save it. | [`val-modify-rejected.txt`](raw-output/val-modify-rejected.txt), [`policy/modify-apim-disable-pna-REJECTED.json`](policy/modify-apim-disable-pna-REJECTED.json) |
+| 3 | **Policy `deny` guardrail** | ✅ **Works as a guardrail.** Re-enabling a `Disabled` instance is blocked with `RequestDisallowedByPolicy`. Prevents drift, but cannot *create* the disabled state — pair with IaC/DINE. | [`val-iac-and-deny.txt`](raw-output/val-iac-and-deny.txt), [`policy/audit-deny-apim-public-access.json`](policy/audit-deny-apim-public-access.json) |
+| 4 | **Script in IaC (`deploymentScripts`)** | ⚠️ **Mechanically valid but blocked here.** A single deployment with `dependsOn` the PE runs `az rest` to PATCH `Disabled`. It **failed** because `deploymentScripts` provisions a storage account it authenticates to with **shared keys**, and this subscription enforces *"Storage accounts should prevent shared key access"* (Deny): `KeyBasedAuthenticationNotPermitted`. | [`val-deploymentscript.txt`](raw-output/val-deploymentscript.txt), [`bicep/apim-disable-deploymentscript.bicep`](bicep/apim-disable-deploymentscript.bicep) |
+
+### Why the `deploymentScripts` approach is a trap in governed tenants
+
+`Microsoft.Resources/deploymentScripts` spins up an **Azure Container Instance + a Storage account** (an Azure Files share for the script/outputs) and mounts that share using the **storage account key**. There is no identity-only mount option today, so the account *must* keep shared-key access enabled. The very tenants that want `publicNetworkAccess=Disabled` are usually the ones that also enforce *"disable shared key access on storage"* — so this option tends to be unavailable exactly where you'd reach for it. What you'd trade: one tidy single-shot deployment **for** a hard dependency on key-based storage plus extra ACI/storage cost and imperative error-handling inside your template.
+
+> **Terraform note:** the equivalent second write in Terraform (`azapi_update_resource` / `azapi_resource_action`, or `null_resource` + `local-exec`) runs on the **pipeline agent**, *not* in an Azure-side storage-backed container, so it has **no** shared-key dependency. Terraform users can embed the post-create disable without hitting this limit.
 
 ---
 
@@ -184,6 +271,8 @@ Evidence: [`raw-output/s4-dine-remediation.txt`](raw-output/s4-dine-remediation.
 ## IaC reference
 
 [`bicep/apim-private.bicep`](bicep/apim-private.bicep) — parameterised two-phase template. Phase 1 (`disablePublicNetworkAccess=false`) creates APIM + private endpoint; phase 2 (`=true`) flips it to `Disabled`. Terraform equivalent: `azurerm_api_management.public_network_access_enabled = false` + `azurerm_private_endpoint`.
+
+[`bicep/apim-disable-deploymentscript.bicep`](bicep/apim-disable-deploymentscript.bicep) — the *niche* single-deployment variant: an embedded `Microsoft.Resources/deploymentScripts` runs `az rest` to PATCH `Disabled` (in a real template, `dependsOn` the private endpoint). See the [validation](#val--validating-the-other-at-scale-approaches) for why it is blocked in tenants that disable shared-key storage.
 
 ## Reproduce
 

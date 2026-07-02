@@ -1,0 +1,14 @@
+VAL-MODIFY - Proving the Policy 'modify' effect is impossible for this alias
+Date: 2026-07-02
+
+CMD: az policy definition create --name apim-modify-pna-test --mode Indexed --rules @modrules.json
+  (rules use effect=modify, operation addOrReplace on field
+   'Microsoft.ApiManagement/service/publicNetworkAccess' = 'Disabled')
+
+OUT ERROR (InvalidPolicyRuleModifyDetails):
+  The policy definition 'apim-modify-pna-test' has operations referring to aliases that
+  are not modifiable: 'Microsoft.ApiManagement/service/publicNetworkAccess'.
+
+CONCLUSION: Azure Policy REJECTS the modify definition at CREATION time - you cannot even
+save it. This is the definitive proof (beyond the alias metadata in S0) that a modify
+effect cannot be used to set publicNetworkAccess on APIM. This is why DINE is required.

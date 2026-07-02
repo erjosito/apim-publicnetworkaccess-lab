@@ -1,0 +1,37 @@
+# Validation: run a script INSIDE the IaC deployment (Microsoft.Resources/deploymentScripts)
+# Scenario: instead of a separate pipeline "phase 2", embed an AzureCLI deploymentScript in
+# the Bicep/ARM template that PATCHes publicNetworkAccess=Disabled after the private endpoint
+# exists (dependsOn). Template: bicep/apim-disable-deploymentscript.bicep
+# Identity: user-assigned MI 'uami-deployscript' with role 'API Management Service Contributor'.
+
+$ az deployment group create -g rg-apim-pna-lab2 -n apim-ds-disable \
+    --template-file bicep/apim-disable-deploymentscript.bicep \
+    --parameters serviceName=apim-iac-ven9pg uamiId=<uami> uamiClientId=<clientId>
+
+# RESULT: FAILED in this subscription.
+# The deploymentScripts engine auto-provisions a Storage account (Azure Files share + ACI)
+# to run the container, and it authenticates to that storage with SHARED KEYS. This
+# subscription enforces an Azure Policy that DENIES shared-key auth on storage accounts:
+
+DeploymentScriptOperationFailed:
+  "Key based authentication is not permitted on this storage account."
+  Status: 403 (KeyBasedAuthenticationNotPermitted)
+  <Error><Code>KeyBasedAuthenticationNotPermitted</Code>
+  <Message>Key based authentication is not permitted on this storage account.</Message></Error>
+
+# ROOT CAUSE / FINDING:
+# Microsoft.Resources/deploymentScripts REQUIRES a storage account that allows shared-key
+# access (it mounts an Azure Files share via the account key; there is no identity-only
+# mount option today). Security-hardened subscriptions that enforce
+# "Storage accounts should prevent shared key access" (Deny) therefore CANNOT run
+# deployment scripts at all - neither the auto-created account nor a bring-your-own account
+# is allowed to keep key access enabled.
+#
+# So the "script-from-IaC" approach is mechanically valid (dependsOn PE -> PATCH Disabled in
+# one deployment) but is BLOCKED in exactly the kind of governed, security-first tenant that
+# would want publicNetworkAccess disabled in the first place. Treat it as a niche option, not
+# a primary at-scale recommendation.
+#
+# Terraform equivalent (azapi_update_resource / azapi_resource_action, or null_resource +
+# local-exec) has NO such dependency - it runs on the pipeline agent, not in an Azure-side
+# storage-backed container - so Terraform users can embed the second write without this limit.

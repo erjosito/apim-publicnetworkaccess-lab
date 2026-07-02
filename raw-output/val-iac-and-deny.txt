@@ -1,0 +1,31 @@
+VAL-IAC - IaC Bicep 2-phase (PRIMARY recommendation)
+Date: 2026-07-02  SKU: Standard v2  RG: rg-apim-pna-lab2  Template: bicep/apim-private.bicep
+
+Phase 1 (disablePublicNetworkAccess=false): create APIM + private endpoint
+  CMD: az deployment group create -g rg-apim-pna-lab2 -n apim-iac-phase1 \
+         --template-file bicep/apim-private.bicep \
+         --parameters serviceName=apim-iac-ven9pg skuName=Standardv2 ... disablePublicNetworkAccess=false
+  OUT: { "pna": "Enabled", "state": "Succeeded" }
+
+Phase 2 (disablePublicNetworkAccess=true): SAME template, flip to Disabled
+  CMD: az deployment group create ... -n apim-iac-phase2 ... disablePublicNetworkAccess=true
+  OUT: { "pna": "Disabled", "state": "Succeeded" }
+
+RESULT: SUCCESS. Declarative, idempotent, pipeline-friendly. The two-phase split is required
+because publicNetworkAccess=Disabled is only accepted once the PE (created in phase 1) exists.
+
+============================================================================================
+
+VAL-DENY - Deny/audit guardrail (drift prevention)
+Date: 2026-07-02  Target: apim-iac-ven9pg (currently Disabled)
+
+Assign Deny policy (effect=Deny, condition publicNetworkAccess != Disabled) at RG scope,
+then attempt to RE-ENABLE public access:
+  CMD: az rest --method PATCH .../apim-iac-ven9pg?api-version=2024-05-01 \
+         --body '{ "properties": { "publicNetworkAccess": "Enabled" } }'
+  OUT ERROR (RequestDisallowedByPolicy):
+    Resource 'apim-iac-ven9pg' was disallowed by policy 'apim-deny-pna-assign'.
+    evaluatedExpressions: publicNetworkAccess Enabled NotEquals Disabled => True => Deny.
+
+RESULT: SUCCESS. Deny blocks re-enabling public access (prevents drift). Deny CANNOT create
+the disabled state itself - it only blocks non-compliant writes; pair it with IaC or DINE.

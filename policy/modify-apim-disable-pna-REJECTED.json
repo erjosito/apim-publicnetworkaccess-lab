@@ -1,0 +1,27 @@
+{
+  "comment": "This Modify policy CANNOT work because the publicNetworkAccess alias is not flagged Modifiable. Kept in the repo to document the empirical rejection (see raw-output/val-modify-rejected.txt).",
+  "policyRule": {
+    "if": {
+      "allOf": [
+        { "field": "type", "equals": "Microsoft.ApiManagement/service" },
+        { "field": "Microsoft.ApiManagement/service/publicNetworkAccess", "notEquals": "Disabled" }
+      ]
+    },
+    "then": {
+      "effect": "modify",
+      "details": {
+        "roleDefinitionIds": [
+          "/providers/Microsoft.Authorization/roleDefinitions/312a565d-c81f-4fd8-895a-4e21e48d571c"
+        ],
+        "conflictEffect": "audit",
+        "operations": [
+          {
+            "operation": "addOrReplace",
+            "field": "Microsoft.ApiManagement/service/publicNetworkAccess",
+            "value": "Disabled"
+          }
+        ]
+      }
+    }
+  }
+}
